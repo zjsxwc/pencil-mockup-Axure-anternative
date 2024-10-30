@@ -46,11 +46,11 @@ DocumentHandler.prototype.openDocument = function (callback) {
             filters: [
                 { name: "Pencil Documents", extensions: thiz.getAllSupportedExtensions(false) }
             ]
-        }, function (filenames) {
-            if (!filenames || filenames.length <= 0) return;
-            Config.set("document.open.recentlyDirPath", path.dirname(filenames[0]));
+        }).then(function (res) {
+            if (!res || !res.filePaths || res.filePaths.length <= 0) return;
+            Config.set("document.open.recentlyDirPath", path.dirname(res.filePaths[0]));
 
-            thiz.loadDocument(filenames[0], callback);
+            thiz.loadDocument(res.filePaths[0], callback);
 
         });
     };
@@ -106,31 +106,15 @@ DocumentHandler.prototype.loadDocument = function(filePath, callback){
 
 
 DocumentHandler.prototype.loadDocumentFromArguments = function (filePath) {
-    var ext = path.extname(filePath);
-    var handler = this.handlerRegistry[ext];
-    if (handler && handler.loadDocument) {
-        var thiz = this;
-        if (!fs.existsSync(filePath)) {
-            callback({
-                error: FileHandler.ERROR_NOT_FOUND,
-                message: "File doesn't exist"
-            });
-
-            return;
-        };
-
-        ApplicationPane._instance.busy();
-
-        handler.loadDocument(filePath)
-            .then(function () {
-                thiz.controller.modified = false;
-                ApplicationPane._instance.unbusy();
-            })
-            .catch(function (err) {
-                thiz.controller.modified = false;
-                ApplicationPane._instance.unbusy();
-            });
+    if (filePath.match(/^.*\.(ep|epgz)$/)) {
+        this.loadDocument(filePath, function () { });
+    } else if (filePath.match(/^.*\.(png|jpg|jpeg|gif|bmp)$/)) {
+        this.resetDocument();
+        this.controller.sayControllerStatusChanged();
+        FontLoader.instance.loadFonts();
+        this.controller.handleNewDocumentFromImage(filePath);
     }
+
 }
 
 DocumentHandler.prototype.pickupTargetFileToSave = function (callback) {
@@ -168,8 +152,9 @@ DocumentHandler.prototype.pickupTargetFileToSave = function (callback) {
         title: "Save as",
         defaultPath: defaultPath,
         filters: filters
-    }, function (filePath) {
-        if (filePath) {
+    }).then(function (res) {
+        if (res && res.filePath) {
+            var filePath = res.filePath;
             var ext = path.extname(filePath);
             if (ext != defaultFileType && fs.existsSync(filePath)) {
                 Dialog.confirm("Are you sure you want to overwrite the existing file?", filePath,
@@ -188,7 +173,7 @@ DocumentHandler.prototype.pickupTargetFileToSave = function (callback) {
             Config.set("document.save.recentlyDirPath", path.dirname(filePath));
         }
         if (callback) {
-            callback(filePath);
+            callback(res.filePath);
         }
     });
 };
@@ -274,7 +259,18 @@ DocumentHandler.prototype.newDocument = function () {
         // thiz.sayDocumentChanged();
         setTimeout(function () {
             var size = thiz.controller.applicationPane.getPreferredCanvasSize();
-            var page = thiz.controller.newPage("Untitled Page", size.w, size.h, null, null, "", null, "activatePage");
+            var options = {
+                name: "Untitled Page",
+                width: size.w,
+                height: size.h,
+                backgroundPageId: null,
+                backgroundColor: null,
+                note: "",
+                parentPageId: null,
+                activateAfterCreate: "activatePage"
+            };
+
+            var page = thiz.controller.newPage(options);
             thiz.controller.modified = false;
         }, 50);
     };
@@ -300,4 +296,11 @@ DocumentHandler.prototype.resetDocument = function () {
 
     this.controller.applicationPane.pageListView.currentParentPage = null;
     FontLoader.instance.setDocumentRepoDir(path.join(this.tempDir.name, "fonts"));
+
+    if (StencilCollectionBuilder.activeCollectionInfo) {
+        StencilCollectionBuilder.cleanup();
+        CollectionManager.reloadActiveBuilderCollection();
+    }
+
+    Pencil.invalidateSharedEditor();
 };

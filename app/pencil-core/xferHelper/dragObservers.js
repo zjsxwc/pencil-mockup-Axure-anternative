@@ -158,6 +158,12 @@ PrivateShapeDefDragObserver.prototype = {
         var defId = nsDragAndDrop.getData("pencil/privatedef");
 
         var def = PrivateCollectionManager.locateShapeDefinition(defId);
+        if (!def) def = CollectionManager.shapeDefinition.locateBuiltinPrivateShapeDef(defId);
+        
+        if (!def) {
+            console.log("Private def not found", defId);
+            return;
+        }
 
         var loc = this.canvas.getEventLocation(event, "withoutZoom");
 
@@ -386,10 +392,12 @@ function FileDragObserver(canvas) {
 }
 FileDragObserver.prototype = {
     acceptsDataTransfer : function (dataTransfer) {
+        console.log("accept checking: ", dataTransfer);
         return dataTransfer && dataTransfer.files && dataTransfer.files.length > 0;
     },
     onDragOver: function (evt, flavour, session){},
     onDrop: function (evt, dataTransfer, session) {
+        console.log("OnDrop, dataTransfer = ", dataTransfer);
 
         for (var i = 0; i < dataTransfer.files.length; i ++) {
             var file = dataTransfer.files[i];
@@ -449,8 +457,7 @@ FileDragObserver.fileTypeHandler = {
         this._handleImageFile(canvas, url, loc, "transparent");
     },
     svg: function (canvas, url, loc) {
-        var file = fileHandler.getFileFromURLSpec(url).QueryInterface(Components.interfaces.nsILocalFile);
-        var fileContents = FileIO.read(file, XMLDocumentPersister.CHARSET);
+        var fileContents = require("fs").readFileSync(url, {encoding: "utf8"});
         FileDragObserver.handleSVGData(fileContents, canvas, loc);
     },
     ep: function (canvas, url) {

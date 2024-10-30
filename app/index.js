@@ -4,17 +4,39 @@ const {app, protocol, shell, BrowserWindow} = require("electron");
 const pkg      = require("./package.json");
 const fs       = require("fs");
 const path     = require("path");
+const os       = require("os");
 
-app.commandLine.appendSwitch("allow-file-access-from-files");
-app.commandLine.appendSwitch("allow-file-access");
+app.commandLine.appendSwitch("no-sandbox");
+app.commandLine.appendSwitch("allow-file-access-from-files", "1");
+app.commandLine.appendSwitch("allow-file-access", "1");
+app.commandLine.appendSwitch("disable-smooth-scrolling");
+app.commandLine.appendSwitch("disable-site-isolation-trials");
+
+const remoteMain = require("@electron/remote/main");
+remoteMain.initialize();
 
 // Disable hardware acceleration by default for Linux
 // TODO: implement a setting for this one and requires a restart after changing that value
 if (process.platform.trim().toLowerCase() == "linux" && app.disableHardwareAcceleration) {
-    console.log("Hardware acceleration disabled for Linux.");
-    app.disableHardwareAcceleration();
+    var useHWAConfig = getAppConfig("core.useHardwareAcceleration");
+    console.log("useHWAConfig: ", useHWAConfig);
+    if (process.argv.indexOf("--with-hwa") < 0 && !useHWAConfig) {
+        console.log("**************** Hardware acceleration disabled for Linux.");
+        app.disableHardwareAcceleration();
+    } else {
+        console.log("Hardware acceleration forcibly enabled.");
+    }
 }
-
+function getAppConfig(name) {
+    var p = path.join(path.join(os.homedir(), ".pencil"), "config.json");
+    try {
+        var json = fs.readFileSync(p, "utf8");
+        var data = JSON.parse(json);
+        return data[name];
+    } catch (e) {
+        return undefined;
+    }
+}
 global.sharedObject = { appArguments: process.argv };
 
 var handleRedirect = (e, url) => {
@@ -31,7 +53,13 @@ function createWindow() {
           webSecurity: false,
           allowRunningInsecureContent: true,
           allowDisplayingInsecureContent: true,
-          defaultEncoding: "UTF-8"
+          defaultEncoding: "UTF-8",
+          nodeIntegration: true,
+          contextIsolation: false,
+          enableRemoteModule: true,
+          experimentalFeatures: true,
+          disableDialogs: true,
+          enableBlinkFeatures: "FontAccess"
         },
     };
 
@@ -39,6 +67,7 @@ function createWindow() {
     mainWindowProperties.icon = path.join(__dirname, iconFile);
 
     mainWindow = new BrowserWindow(mainWindowProperties);
+    remoteMain.enable(mainWindow.webContents)
 
     var devEnable = false;
     if (process.argv.indexOf("--enable-dev") >= 0) {
@@ -49,11 +78,11 @@ function createWindow() {
 
     app.devEnable = devEnable;
 
-    mainWindow.hide();
+    //mainWindow.hide();
     mainWindow.maximize();
 
     if (devEnable) {
-        mainWindow.webContents.openDevTools();
+        //mainWindow.webContents.openDevTools();
     } else {
         mainWindow.setMenu(null);
     }
@@ -62,7 +91,7 @@ function createWindow() {
     mainWindow.loadURL(mainUrl);
     mainWindow.show();
 
-    //mainWindow.webContents.openDevTools();
+    if (devEnable) mainWindow.webContents.openDevTools();
 
     mainWindow.on("closed", function() {
         mainWindow = null;
@@ -99,16 +128,12 @@ app.on('ready', function() {
 
         fs.readFile(path, function (err, data) {
             if (err) {
-                callback({mimeType: "text/html", data: new Buffer("Not found")});
+                callback({mimeType: "text/html", data: Buffer.from("Not found")});
             } else {
-                callback({mimeType: "image/jpeg", data: new Buffer(data)});
+                callback({mimeType: "image/jpeg", data: Buffer.from(data)});
             }
         });
 
-    }, function (error, scheme) {
-        if (error) {
-            console.log("ERROR REGISTERING", error);
-        }
     });
 
 
@@ -120,6 +145,9 @@ app.on('ready', function() {
 
     const webPrinter = require("./pencil-core/common/webPrinter");
     webPrinter.start();
+
+    const globalShortcutMainService = require("./tools/global-shortcut-main.js");
+    globalShortcutMainService.start();
 });
 app.on("activate", function() {
     // On OS X it's common to re-create a window in the app when the
@@ -129,6 +157,10 @@ app.on("activate", function() {
     } else {
         app.show();
     }
+});
+
+app.on("will-quit", function () {
+  require("electron").globalShortcut.unregisterAll()
 });
 
 process.on('uncaughtException', function (error) {

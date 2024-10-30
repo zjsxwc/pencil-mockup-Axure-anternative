@@ -29,8 +29,12 @@ Shape.prototype.setupTargetMap = function (shouldRepair) {
         if (!target) {
             if (shouldRepair) {
                 console.error("Target '" + name + "' is not found. Repairing now...");
-                this.repair();
-                this.setupTargetMap();
+                try {
+                    this.repair();
+                    console.log("  >>  Target '" + name + "' is repaired.");
+                } catch (e) {
+                    console.error(e);
+                }
                 return;
             } else {
                 console.error("Target '" + name + "' is not found. Ignoring...");
@@ -189,7 +193,8 @@ Shape.prototype.renewTargetProperties = function () {
 };
 Shape.prototype.repair = function () {
     this.canvas.invalidateShapeContent(this.svg, this.def);
-    for (name in this.def.propertyMap) {
+    this.setupTargetMap();
+    for (var name in this.def.propertyMap) {
         this.applyBehaviorForProperty(name);
     }
 };
@@ -357,7 +362,13 @@ Shape.prototype.evalExpression = function (expression, value) {
         return defaultValue;
     }
 };
-Shape.prototype.setProperty = function (name, value, nested) {
+Shape.prototype.setProperty = function (name, value, nested, mask) {
+    if (mask) {
+        try {
+            value = mask.apply(this.getProperty(name), value);
+        } catch (e) {
+        }
+    }
     if (!nested) {
         this._appliedTargets = [];
         this.canvas.run( function () {
@@ -1126,6 +1137,10 @@ Shape.prototype.getSnappingGuide = function () {
 
     var customSnappingData = this.performAction("getSnappingGuide");
     if (customSnappingData) {
+        if (customSnappingData._ignoreBuiltIns) {
+            vertical.length = 0;
+            horizontal.length = 0;
+        }
         for (var i = 0; i < customSnappingData.length; i++) {
             var data = customSnappingData[i];
             var m = this.svg.getTransformToElement(this.canvas.drawingLayer);
@@ -1141,7 +1156,7 @@ Shape.prototype.getSnappingGuide = function () {
                         ik = k;
                     }
                 }
-                if (ik != -1) {
+                if (ik != -1 && !customSnappingData._allowTypeDuplications) {
                     vertical[ik] = data;
                 } else {
                     vertical.push(data);
@@ -1156,7 +1171,7 @@ Shape.prototype.getSnappingGuide = function () {
                         ik = k;
                     }
                 }
-                if (ik != -1) {
+                if (ik != -1 && !customSnappingData._allowTypeDuplications) {
                     horizontal[ik] = data;
                 } else {
                     horizontal.push(data);

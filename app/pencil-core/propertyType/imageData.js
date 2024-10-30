@@ -58,11 +58,17 @@ ImageData.generateCellString = function (cells) {
     return blocks.join(" ");
 };
 ImageData.invalidateValue = function (oldData, callback) {
-    if (oldData.data.match(/^data:/)) {
+    if (oldData.data.startsWith(ImageData.SVG_IMAGE_DATA_PREFIX)) {
+        var svg = oldData.data.substring(ImageData.SVG_IMAGE_DATA_PREFIX.length + 1);
+
+        let id = Pencil.controller.svgImageToRefSync(svg);
+        callback(new ImageData(oldData.w, oldData.h, ImageData.idToRefString(id)), null);
+    } else if (oldData.data.match(/^data:/)) {
         var image = null;
         try {
             image = nativeImage.createFromDataURL(oldData.data);
         } catch (e) {
+            console.e(e);
         }
 
         if (!image) {
@@ -94,8 +100,14 @@ ImageData.prepareForEmbedding = function (oldData, callback) {
         }
 
         var filePath = Pencil.controller.refIdToFilePath(id);
-        var image = nativeImage.createFromPath(filePath);
-        callback(new ImageData(oldData.w, oldData.h, image.toDataURL()), null);
+        console.log("File path");
+        if (filePath.match(/svg$/i)) {
+            var url = ImageData.SVG_IMAGE_DATA_PREFIX + "," + fs.readFileSync(filePath, "utf8");
+            callback(new ImageData(oldData.w, oldData.h, url), null);
+        } else {
+            var image = nativeImage.createFromPath(filePath);
+            callback(new ImageData(oldData.w, oldData.h, image.toDataURL()), null);
+        }
     } else {
         callback(null);
     }
@@ -139,14 +151,16 @@ ImageData.refStringToUrl = function (refString) {
 ImageData.prompt = function (callback, ext) {
     dialog.showOpenDialog(remote.getCurrentWindow(), {
         title: "Select Image",
-        defaultPath: os.homedir(),
+        defaultPath: Config.get("document.open.recentlyImagePath", null) || os.homedir(),
         filters: [
             { name: "Image files", extensions: ext || ["png", "jpg", "jpeg", "gif", "bmp", "svg"] }
         ]
+    }).then(function (res) {
+        if (!res || !res.filePaths || res.filePaths.length <= 0) return;
+        var p = res.filePaths[0];
+        Config.set("document.open.recentlyImagePath", path.dirname(p));
 
-    }, function (filenames) {
-        if (!filenames || filenames.length <= 0) return;
-        ImageData.fromExternalToImageData(filenames[0], callback);
+        ImageData.fromExternalToImageData(p, callback);
     });
 };
 
@@ -209,7 +223,74 @@ ImageData.convertToEmbeded = function (imageData, callback) {
     ImageData.fromUrlEmbedded(imageData.data, callback);
 };
 
+ImageData.commandsToData = function (pathCommands) {
+    var newData = "";
 
+    for (var command of pathCommands) {
+        if (newData) newData += " ";
+        newData += command.command;
+        if (command.points) {
+            for (var i = 0; i < command.points.length; i ++) {
+                newData += (i > 0 ? " " : "") + command.points[i].x + "," + command.points[i].y;
+            }
+        }
+    }
+
+    return newData;
+};
+ImageData.generatePathSVGData = function (svgPathData, size) {
+    var specs = [];
+    var json = svgPathData.data;
+    if (!json.startsWith("json:")) return specs;
+    var parsedPathData = JSON.parse(json.substring(5));
+
+    for (var info of parsedPathData) {
+        var d = ImageData.commandsToData(info.commands);
+        specs.push({
+            _name: "path",
+            _uri: PencilNamespaces.svg,
+            d: d,
+            style: "stroke: #000000; stroke-width: 1px; fill: rgba(0, 0, 0, 0.1);"
+        });
+    }
+
+    var svg = {
+        _name: "svg",
+        _uri: PencilNamespaces.svg,
+        width: svgPathData.w,
+        height: svgPathData.h,
+        viewBox: "0 0 " + size.w + " " + size.h,
+        _children: [
+            {
+                _name: "g",
+                _uri: PencilNamespaces.svg,
+                //transform: scale(size.w / svgPathData.w, size.h / svgPathData.h),
+                _children: specs
+            }
+        ]
+    }
+
+    var svgDom = Dom.newDOMElement(svg);
+    var svgData = encodeURIComponent(Dom.serializeNode(svgDom));
+    return "data:image/svg+xml," + svgData;
+};
+
+ImageData.prototype.isBitmap = function () {
+    // Only support ref file for now
+    return !!ImageData.refStringToId(this.data);
+};
+
+ImageData.prototype.toImageSrc = function () {
+    if (!this.data) return "";
+
+    if (this.data.startsWith("json:")) {
+        return ImageData.generatePathSVGData(this, this);
+    } else if (this.data.startsWith("data:")) {
+        return this.data;
+    } else {
+        return ImageData.refStringToUrl(this.data);
+    }
+};
 ImageData.prototype.toString = function () {
     if (!this.xCells && !this.yCells) {
         return [this.w, this.h, this.data].join(",");
@@ -217,6 +298,7 @@ ImageData.prototype.toString = function () {
         return [this.w, this.h, ImageData.generateCellString(this.xCells), ImageData.generateCellString(this.yCells), this.data].join(",");
     }
 };
+
 ImageData.SVG_IMAGE_DATA_PREFIX = "data:image/svg+xml";
 ImageData.prototype.getDataAsXML = function () {
     var url = this.data;
@@ -237,6 +319,93 @@ ImageData.prototype.getDataAsXML = function () {
         return fs.readFileSync(filePath, "utf8");
     }
     return null;
+};
+
+ImageData.fromScreenshot = function (callback, providedOptions) {
+    /*
+    var capturer = require("electron-screencapture");
+    var electron = require("electron");
+
+    var displays = electron.screen.getAllDisplays();
+    if (!displays || displays.length <= 0) {
+        console.error("No dispaly found");
+        return;
+    }
+
+    var display = displays[0];
+
+    const remote = electron.remote;
+    const BrowserWindow = remote.BrowserWindow;
+    // var win = new BrowserWindow({ width: 800, height: 600, transparent: false, frame: true, fullscreen: false, enableLargerThanScreen: true });
+    var win = new BrowserWindow({
+        x: display.bounds.x,
+        y: display.bounds.y,
+        width: display.bounds.width,
+        height: display.bounds.height,
+        transparent: true,
+        frame: false,
+        fullscreen: false,
+        enableLargerThanScreen: true,
+        show: false}
+    );
+    var mainUrl = "file://" + __dirname + "/tools/screen-cap.xhtml";
+    win.loadURL(mainUrl);
+    //win.webContents.openDevTools();
+    //win.setFullScreen(true);
+
+    return;
+    */
+
+    var provider = ScreenCaptureProvider.getActiveProvider();
+    if (!provider) {
+        callback(null, new Error("No provider found"));
+        return;
+    }
+
+    var executer = function (options) {
+        var tmp = require("tmp");
+        var localPath = tmp.tmpNameSync({postfix: ".png"});
+
+        console.log("Requested local path: ", localPath);
+
+        var win = remote.getCurrentWindow();
+
+        if (options.hidePencil) win.hide();
+
+        options.outputType = BaseCaptureService.OUTPUT_FILE;
+        options.outputPath = localPath;
+
+        var delay = (options.delay ? parseInt(options.delay, 10) * 1000 : 0) + 100;
+
+        window.setTimeout(function () {
+            provider.capture(options).then(function () {
+                if (options.hidePencil) win.show();
+                ImageData.fromExternalToImageData(localPath, function (imageData) {
+                    //As the image is getting directly from device screenshot, the number of pixel was already multiplied by the scale
+                    var ratio = remote.screen.getPrimaryDisplay().scaleFactor;
+                    if (ratio > 1) {
+                        imageData.w = Math.round(imageData.w / ratio);
+                        imageData.h = Math.round(imageData.h / ratio);
+                    }
+
+                    var fs = require("fs");
+                    fs.unlinkSync(localPath);
+                    callback(imageData, options);
+                });
+            }).catch(function (error) {
+                if (options.hidePencil) win.show();
+                callback(null, options, error);
+            });
+        }, delay);
+    };
+
+    if (providedOptions) {
+        executer(providedOptions);
+    } else {
+        var optionDialog = new ScreenCaptureOptionDialog();
+        optionDialog.callback(executer);
+        optionDialog.open(provider);
+    }
 };
 
 window.addEventListener("load", function () {

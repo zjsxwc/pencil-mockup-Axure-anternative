@@ -11,7 +11,11 @@
             padding-right: 0.3em;
             position: relative;
             overflow: visible;
-            min-height: 2.8em;
+        }
+
+        body[compact-layout='true'] @header,
+        body[compact-layout='true'] @filterContainer {
+            min-height: 1.8em;
         }
 
         @filterContainer {
@@ -45,15 +49,23 @@
             line-height: 1.555555556;
             font-size: 0.9em;
         }
+        @header > hbox {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         @pageListContainer {
-            padding: 1em;
+            padding: 0.7em;
             overflow-y: none;
             overflow-x: none;
-            height: 6em;
-            align-items: center;
         }
+        
+        body[compact-layout='true'] @pageListContainer {
+            padding: 0.5em;
+        }
+
+        
         @pageListContainer > .widget_PageThumbnailView + .widget_PageThumbnailView {
-            margin-left: 1em;
+            margin-left: 0.7em;
         }
 
         @pageListContainer > .widget_PageThumbnailView[dragged] {
@@ -84,6 +96,13 @@
             cursor: default;
             min-height: 1.8em;
         }
+
+        body[compact-layout='true'] @pageBreadcrumb,
+        body[compact-layout='true'] @childPageContainer,
+        body[compact-layout='true'] @nameTextBoxContainer {
+            min-height: 1.2em;
+        }
+
         @childPageSrollView {
             background: #FFF;
             border: solid 1px darken(@app_bg, 15%);
@@ -100,6 +119,14 @@
             line-height: 1.6em;
             position: relative;
         }
+
+        body[compact-layout='true'] @pageBreadcrumb > hbox,
+        body[compact-layout='true'] @childPageContainer > hbox,
+        body[compact-layout='true'] @nameTextBoxContainer > hbox {
+            line-height: 1.2em;
+            font-size: 0.9em;
+        }
+
         @childPageContainer > hbox {
             background: #F7F7F7;
         }
@@ -117,7 +144,17 @@
         @childPageContainer > hbox:hover {
             color: @selected_bg;
         }
-
+        
+        @pageBreadcrumb > hbox[selected="true"] > button {
+            background: @selected_bg;
+            color: @selected_fg;
+            border-color: @selected_fg;
+            text-shadow: none;
+        }
+        
+        @pageBreadcrumb > hbox[selected="true"] > button > span:hover {
+            color: @selected_fg;
+        }
 
         @pageBreadcrumb > hbox > span{
             padding: 0em 0.5em;
@@ -151,6 +188,7 @@
 
         @childPageContainer > hbox {
             border: 1px solid #CCC;
+            border-radius: 0.3ex;
             padding: 0px 0.5em;
             cursor: pointer;
             align-items: center;
@@ -180,18 +218,17 @@
             outline-offset: 0px;
         }
         @childPageContainer .button_Down {
-            padding: 0em 0.3em;
+            padding: 0em 0.2em;
             border: none;
             border-radius: 0em;
             background: transparent;
-            margin-left: 0.4em;
         }
         @childPageContainer .button_Down > i {
             line-height: 1.5em;
         }
 
         hbox > .button_Down:hover {
-            background: rgba(0, 0, 0, 0.1);
+            background: #dbeeff;
         }
         hbox[selected="true"] > .button_Down:hover {
             background: rgba(255, 255, 255, 0.2);
@@ -225,6 +262,7 @@
 
         body .widget_PageListView:not(.Collapsed) @childPageSrollView {
             visibility: hidden;
+            display: none;
         }
         body .widget_PageListView.Collapsed @pageListSrollView {
             display: none;

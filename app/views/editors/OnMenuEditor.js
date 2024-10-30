@@ -113,6 +113,36 @@ OnMenuEditor.prototype.generateMenuItems = function () {
                 }
                 items.push(enumItem);
             } else if (property.type == ImageData) {
+                var imgeData = this.targetObject.getProperty(property.name);
+
+                var imageEditItem = {
+                    label: "Edit Image...",
+                    icon: "brush",
+                    type: "Normal",
+                    imageData: imgeData,
+                    property: property.name,
+                    isValid: function () {
+                        return imgeData && imgeData.isBitmap();
+                    },
+                    handleAction: function () {
+                        var propName = this.property;
+                        var dialog = new ExternalImageEditorDialog();
+                        dialog.open({
+                            imageData: this.imageData,
+                            onDone: function (newImageData, options) {
+                                thiz.targetObject.setProperty(propName, newImageData);
+                                if (options && options.updateBox) {
+                                    var ratio = window.devicePixelRatio || 1;
+                                    var dim = new Dimension(Math.round(newImageData.w / ratio), Math.round(newImageData.h / ratio));
+                                    thiz.targetObject.setProperty("box", dim);
+                                }
+                            }
+                        });
+                    }
+                }
+                items.push(imageEditItem);
+                importantItems.push(imageEditItem);
+
                 if (this.targetObject.def) {
                     var meta = this.targetObject.def.propertyMap[property.name].meta["npatch-edit"];
                     if (meta) {
@@ -122,13 +152,12 @@ OnMenuEditor.prototype.generateMenuItems = function () {
                         continue;
                     }
                 }
-                var value = thiz.targetObject.getProperty(property.name);
 
                 var imageNPathSpecEditItem = {
                     label: "Configure N-Patch...",
                     icon: "grid_on",
                     type: "Normal",
-                    imageData: value,
+                    imageData: imgeData,
                     property: property.name,
                     handleAction: function () {
                         var propName = this.property;

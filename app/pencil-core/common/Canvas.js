@@ -1,4 +1,4 @@
-function Canvas(element, options) {
+function Canvas(element, options, containerScrollPane) {
     this.element = element;
     this.oldElement = "";
     this.__delegate("addEventListener", "hasAttribute", "getAttribute", "setAttribute", "setAttributeNS", "removeAttribute", "removeAttributeNS", "dispatchEvent");
@@ -172,6 +172,8 @@ function Canvas(element, options) {
 
     this.snappingHelper = new SnappingHelper(this);
 
+    this.eventHooks = [];
+
     this.idSeed = 1;
 
     this.onScreenEditors = [];
@@ -180,7 +182,7 @@ function Canvas(element, options) {
     this.svg.addEventListener("click", function (event) {
         thiz.handleClick(event);
     }, false);
-    this.svg.addEventListener("mousedown", function (event) {
+    (containerScrollPane || this.svg).addEventListener("mousedown", function (event) {
         thiz.movementDisabled = Pencil.controller.movementDisabled || event.ctrlKey;
         // document.commandDispatcher.advanceFocus();
         thiz.focus();
@@ -347,6 +349,34 @@ function Canvas(element, options) {
         this.snappingHelper.rebuildSnappingGuide();
     }.bind(this));
 
+    this.resizer = this.element.ownerDocument.createElement("div");
+    this.element.appendChild(this.resizer);
+    Dom.addClass(this.resizer, "CanvasResizer");
+    this.resizeInfoLabel = this.element.ownerDocument.createElement("span");
+    this.resizer.appendChild(this.resizeInfoLabel);
+
+    this.resizer.addEventListener("mousedown", function (event) {
+        event.preventDefault();
+        if (this.element.hasAttribute("resizing")) {
+            this.resizing = true;
+            this.resizeInfo = {
+                ox: event.clientX,
+                oy: event.clientY,
+                ow: this.width,
+                oh: this.height
+            };
+            this.resizeInfoLabel.innerHTML = this.width + " x " + this.height;
+            return;
+        }
+    }.bind(this), false);
+
+    Canvas.lifeCycleListeners.forEach(function (listener) {
+        try {
+            listener.onNewInstance(thiz);
+        } catch (e) {
+            console.error(e);
+        }
+    });
 }
 
 SVGElement.prototype.getTransformToElement = SVGElement.prototype.getTransformToElement || function(elem) {
@@ -358,6 +388,23 @@ Object.defineProperty(Canvas.prototype, "ownerDocument", {
         return this.element.ownerDocument;
     }
 });
+
+Canvas.lifeCycleListeners = [];
+
+Canvas.registerLifeCycleListener = function (listener) {
+    Canvas.lifeCycleListeners.push(listener);
+};
+
+Canvas.prototype.registerEventHook = function (hook) {
+    this.eventHooks.push(hook);
+};
+Canvas.prototype.executeEventHooks = function (event, name) {
+    return !this.eventHooks.every(function (hook) {
+        var f = hook[name || event.type];
+        if (!f) return true;
+        return !f.call(hook, event);
+    });
+};
 
 Canvas.prototype.createElementByName = function (name) {
     return this.element.ownerDocument.createElement("span");
@@ -603,8 +650,8 @@ Canvas.prototype.getZoomedGeo = function (target) {
 Canvas.prototype.getSize = function () {
 
     return {
-        width : parseInt(this.getAttribute("width"), 10),
-        height : parseInt(this.getAttribute("height"), 10),
+        width : parseInt(this.svg.getAttribute("width"), 10),
+        height : parseInt(this.svg.getAttribute("height"), 10),
     };
 
 };
@@ -868,7 +915,6 @@ Canvas.prototype.handleMouseWheel = function(event) {
 
         var drawingX = this.lastMouse.x;
         var drawingY = this.lastMouse.y;
-        console.log("drawing pos", [drawingX, drawingY]);
         var dx = drawingX * this.zoom + padding - this._scrollPane.scrollLeft;
         var dy = drawingY * this.zoom + padding - this._scrollPane.scrollTop;
 
@@ -941,6 +987,14 @@ Canvas.prototype.handleScrollPane = function(event) {
 }
 
 Canvas.prototype.handleMouseUp = function (event) {
+    if (this.executeEventHooks(event)) return;
+    //if (this.gestureHelper && this.gestureHelper.handleMouseUp(event)) return;
+
+    if (this.resizing) {
+        this.commitResize(event);
+        this.isSelectingRange = false;
+        return;
+    }
 
     if (this.reClick && !this.hasMoved) {
         for (editor in this.onScreenEditors)
@@ -958,12 +1012,16 @@ Canvas.prototype.handleMouseUp = function (event) {
             });
         }
 
+        Connector.prepareInvalidation(this);
+
         if (this.currentController.invalidateOutboundConnections) {
             this.currentController.invalidateOutboundConnections();
         }
         if (this.currentController.invalidateInboundConnections) {
             this.currentController.invalidateInboundConnections();
         }
+
+        Connector.finishInvalidation();
     }
     if (this.controllerHeld && this.hasMoved) {
         // just to save state
@@ -1115,7 +1173,74 @@ Canvas.prototype.handleClick = function (event) {
     }
 
 };
+Canvas.prototype.commitResize = function (event) {
+    this.resizing = false;
+    if (this.resizeInfo && this.resizeInfo.lastSize) {
+        Pencil.controller.setActiveCanvasSize(this.resizeInfo.lastSize.w, this.resizeInfo.lastSize.h)
+    }
+    this.resizeInfo = null;
+    this.element.removeAttribute("resizing");
+};
+Canvas.prototype.handleResizeMouseMove = function (event) {
+    if (this.resizing) {
+
+        var dw = Math.round((event.clientX - this.resizeInfo.ox) / this.zoom);
+        var dh = Math.round((event.clientY - this.resizeInfo.oy) / this.zoom);
+
+        if (event.shiftKey) dw = 0;
+
+        var newW = this.resizeInfo.ow + dw;
+        var newH = this.resizeInfo.oh + dh;
+
+        if (event.ctrlKey) {
+            newW = Math.round(newW / 10) * 10;
+            newH = Math.round(newH / 10) * 10;
+        }
+
+        this.resizeInfo.lastSize = {
+            w: newW,
+            h: newH
+        };
+
+        var w = Math.ceil(newW * this.zoom);
+        var h = Math.ceil(newH * this.zoom);
+        this.element.style.width = w + "px";
+        this.element.style.height = h + "px";
+
+        this.resizeInfoLabel.innerHTML = w + " x " + h;
+
+        return;
+    }
+
+    var rect = this.svg.parentNode.getBoundingClientRect();
+    var bound = {
+        x: rect.left + rect.width - this.resizer.offsetWidth,
+        y: rect.top + rect.height - this.resizer.offsetHeight,
+        width: this.resizer.offsetWidth,
+        height: this.resizer.offsetHeight
+    };
+
+    var thiz = this;
+    if (event.clientX >= bound.x && event.clientX <= bound.x + bound.width
+        && event.clientY >= bound.y && event.clientY <= bound.y + bound.width) {
+        if (!this.showResizerTimeout) {
+            this.showResizerTimeout = window.setTimeout(function () {
+                thiz.showResizerTimeout = null;
+                thiz.element.setAttribute("resizing", "true");
+                thiz.resizeInfoLabel.innerHTML = thiz.width + " x " + thiz.height;
+            }, 1000);
+        }
+    } else {
+        if (this.showResizerTimeout) window.clearTimeout(this.showResizerTimeout);
+        this.element.removeAttribute("resizing");
+        this.showResizerTimeout = null;
+    }
+    return false;
+};
 Canvas.prototype.handleMouseMove = function (event, fake) {
+    if (!fake && this.handleResizeMouseMove(event)) return;
+    if (this.executeEventHooks(event)) return;
+
     try {
         if (this.duplicateMode && !this.mouseUp) {
             if(this.duplicateFunc) {
@@ -1170,6 +1295,12 @@ Canvas.prototype.handleMouseMove = function (event, fake) {
                 if (this.movementDisabled) return;
             }
 
+            //avoid accidental move when user is trying to select the object
+            var msFromClick = event.timeStamp - this._mouseDownAt;
+            if (msFromClick < 100) {
+                return;
+            }
+
             if (this.currentController.markAsMoving)
                 this.currentController.markAsMoving(true);
             var newX = Math.round(event.clientX / this.zoom);
@@ -1177,6 +1308,10 @@ Canvas.prototype.handleMouseMove = function (event, fake) {
 
             var dx = newX - this.oX;
             var dy = newY - this.oY;
+
+            //direction ratios
+            var hdr = event.ctrlKey && Math.abs(dx) < Math.abs(dy) ? 0 : 1;
+            var vdr = event.ctrlKey && Math.abs(dx) >= Math.abs(dy) ? 0 : 1;
 
             var accX = Math.abs(newX - this._lastNewX) < 2;
             var accY = Math.abs(newY - this._lastNewY) < 2;
@@ -1193,90 +1328,17 @@ Canvas.prototype.handleMouseMove = function (event, fake) {
 
             this.hasMoved = true;
 
-            var gridSize = Pencil.getGridSize();
-            var snap = null;
-            if (Config.get("object.snapping.enabled", true) == true) {
-                snap = this.snappingHelper.findSnapping(accX
-                        && !this.snappingHelper.snappedX, accY
-                        && !this.snappingHelper.snappedY, null, null,
-                        event.shiftKey);
-            }
-            if (Config.get("edit.snap.grid", false) == true) {
-                var snapGrid = this.snappingHelper.findSnapping(accX
-                        && !this.snappingHelper.snappedX, accY
-                        && !this.snappingHelper.snappedY, null, gridSize.w / 2,
-                        event.shiftKey, true);
-                if (snap && snapGrid) {
-                    if (snap.dx == 0) {
-                        snap.dx = snapGrid.dx;
-                    }
-                    if (snap.dy == 0) {
-                        snap.dy = snapGrid.dy;
-                    }
-                } else {
-                    snap = snapGrid;
-                }
-                // debug("snap grid: " + [snapGrid.dx, snapGrid.dy]);
-            }
-            // debug("snap: " + [snap.dx, snap.dy, this.snappedX,
-            // this.snappedY]);
-            if (!event.shiftKey
-                    && snap
-                    && ((snap.dx != 0 && !this.snappingHelper.snappedX && accX) || (snap.dy != 0
-                            && !this.snappingHelper.snappedY && accY))) {
-                if (snap.dx != 0 && !this.snappingHelper.snappedX) {
-                    this.snappingHelper.snappedX = true;
-                    this.snappingHelper.snapX = newX;
-                    this.currentController._pSnapshot.lastDX += snap.dx;
-                    // debug("snapX");
-                }
-                if (snap.dy != 0 && !this.snappingHelper.snappedY) {
-                    this.snappingHelper.snappedY = true;
-                    this.snappingHelper.snapY = newY;
-                    this.currentController._pSnapshot.lastDY += snap.dy;
-                    // debug("snapY");
-                }
-                this.currentController.moveBy(snap.dx, snap.dy);
-            } else {
-                var unsnapX = event.shiftKey
-                        || (this.snappingHelper.snapX != 0 && (Math
-                                .abs(this.snappingHelper.snapX - newX) > this.snappingHelper.unsnapX));
-                var unsnapY = event.shiftKey
-                        || (this.snappingHelper.snapY != 0 && (Math
-                                .abs(this.snappingHelper.snapY - newY) > this.snappingHelper.unsnapY));
-                // debug("unsnap: " + [unsnapX, unsnapY]);
+            dx = dx * hdr;
+            dy = dy * vdr;
 
-                if (!this.snappingHelper.snappedX
-                        && !this.snappingHelper.snappedY) {
-                    this.currentController.moveFromSnapshot(dx, dy);
-                } else {
-                    if (unsnapX || !this.snappingHelper.snappedX) {
-                        this.currentController
-                                .moveFromSnapshot(
-                                        dx,
-                                        this.snappingHelper.snappedY ? this.currentController._pSnapshot.lastDY
-                                                : dy);
-                    }
-                    if (unsnapY || !this.snappingHelper.snappedY) {
-                        this.currentController
-                                .moveFromSnapshot(
-                                        this.snappingHelper.snappedX ? this.currentController._pSnapshot.lastDX
-                                                : dx, dy);
-                        this.snappingHelper.snapY = 0;
-                        this.snappingHelper.snappedY = false;
-                    }
-                    if (unsnapX || !this.snappingHelper.snappedX) {
-                        this.snappingHelper.snapX = 0;
-                        this.snappingHelper.snappedX = false;
-                    }
-                    if (unsnapX) {
-                        this.snappingHelper.clearSnappingGuideX();
-                    }
-                    if (unsnapY) {
-                        this.snappingHelper.clearSnappingGuideY();
-                    }
-                }
+            if (!event.shiftKey) {
+                var snapResult = this.snappingHelper.applySnapping(dx, dy, this.currentController);
+                if (snapResult && snapResult.xsnap) dx = snapResult.xsnap.d;
+                if (snapResult && snapResult.ysnap) dy = snapResult.ysnap.d;
             }
+
+            this.currentController.moveFromSnapshot(dx, dy);
+
             if (this.currentController.dockingManager) {
                 this.currentController.dockingManager.altKey = event.altKey;
             }
@@ -1369,12 +1431,14 @@ Canvas.prototype.handleKeyPress = function (event) {
             // this.currentController.moveBy(dx, dy);
             this.currentController.moveBy(dx, dy, false, true);
 
+            Connector.prepareInvalidation(this);
             if (this.currentController.invalidateOutboundConnections) {
                 this.currentController.invalidateOutboundConnections();
             }
             if (this.currentController.invalidateInboundConnections) {
                 this.currentController.invalidateInboundConnections();
             }
+            Connector.finishInvalidation();
 
         }, this, Util.getMessage("action.move.shape"));
 
@@ -1817,7 +1881,7 @@ Canvas.prototype.invalidateEditors = function (source) {
             e.invalidate();
     }
 
-    // Pencil.invalidateSharedEditor();
+    Pencil.invalidateSharedEditor();
     // invalidates all selections
     for (var i = 0; i < this.selectionContainer.childNodes.length; i++) {
         var rect = this.selectionContainer.childNodes[i];
@@ -1871,7 +1935,7 @@ Canvas.prototype.focus = function () {
     // document.getElementById("richTextEditorToolbar").focus();
     // document.commandDispatcher.rewindFocus();
     // document.commandDispatcher.advanceFocus();
-    this.focusableBox.focus("");
+    this.focusableBox.focus();
 
 };
 Canvas.prototype.doCopy = function () {
@@ -1899,6 +1963,8 @@ Canvas.prototype.doPaste = function (withAlternative) {
     this.useAlternativePasting = withAlternative ? true : false;
     var formats = clipboard.availableFormats();
     if (!formats) return;
+
+    console.log("Available formats: ", formats);
 
     var contents = [];
 
@@ -1993,7 +2059,7 @@ Canvas.prototype.doPaste = function (withAlternative) {
     }
 
     if (formats.indexOf(RichTextXferHelper.MIME_TYPE) >= 0) {
-        var html = clipboard.readHtml();
+        var html = clipboard.readHTML();
         if (html) {
             contents.push({
                 type: RichTextXferHelper.MIME_TYPE,
@@ -2008,10 +2074,10 @@ Canvas.prototype.doPaste = function (withAlternative) {
             var id = Pencil.controller.nativeImageToRefSync(image);
             var size = image.getSize();
 
-            contents.push({
+            contents = [{
                 type: PNGImageXferHelper.MIME_TYPE,
                 data: new ImageData(size.width, size.height, ImageData.idToRefString(id))
-            });
+            }];
         }
     }
 
@@ -2040,10 +2106,14 @@ Canvas.prototype.doPaste = function (withAlternative) {
 };
 
 Canvas.prototype.handleMouseDown = function (event) {
+    this._mouseDownAt = event.timeStamp;
     event.preventDefault();
 
     tick("begin");
     Dom.emitEvent("p:CanvasMouseDown", this.element, {});
+
+    if (this.executeEventHooks(event)) return;
+    //if (this.gestureHelper && this.gestureHelper.handleMouseDown(event)) return;
 
     var canvasList = Pencil.getCanvasList();
     for (var i = 0; i < canvasList.length; i++) {
@@ -2060,15 +2130,14 @@ Canvas.prototype.handleMouseDown = function (event) {
     var isInControlLayer = Dom.findUpward(event.originalTarget, function (node) {
         return (node == thiz.controlLayer);
     });
-    if (isInControlLayer)
-        return;
+    if (isInControlLayer) return;
 
     var top = Dom.findTop(event.originalTarget, function (node) {
         return node.hasAttributeNS
                 && node.hasAttributeNS(PencilNamespaces.p, "type");
     });
-    if (top && this.isShapeLocked(top))
-        top = null;
+
+    if (top && this.isShapeLocked(top)) top = null;
 
     if (!top) {
         this.lastTop = null;
@@ -2181,6 +2250,7 @@ Canvas.prototype.handleMouseDown = function (event) {
 
             tick("before setPositionSnapshot");
             thiz.currentController.setPositionSnapshot();
+            thiz.snappingHelper.onControllerSnapshot(this.currentController);
             tick("after setPositionSnapshot");
 
             thiz.duplicateFunc = null;
@@ -2224,6 +2294,7 @@ Canvas.prototype.handleMouseDown = function (event) {
 
             tick("before setPositionSnapshot");
             this.currentController.setPositionSnapshot();
+            this.snappingHelper.onControllerSnapshot(this.currentController);
             tick("after setPositionSnapshot");
 
             if (event.button == 0)
@@ -2332,6 +2403,8 @@ Canvas.prototype.doUnGroupImpl_ = function () {
             this.snappingHelper
                     .updateSnappingGuide(this.currentController.targets[t]);
         }
+    } else {
+        this.snappingHelper.updateSnappingGuide(this.currentController);
     }
 
 };
@@ -2764,8 +2837,8 @@ Canvas.prototype.insertPrivateShapeImpl_ = function (shapeDef, bound) {
             var bbox = this.currentController.getBounding();
             //note: the returned bbox is NOT zoomed
             this.currentController.moveBy(
-                    (bound.x - bbox.x - Math.round(bbox.width / 2)),
-                    (bound.y - bbox.y - Math.round(bbox.height / 2)),
+                    Math.round(bound.x - bbox.x - bbox.width / 2),
+                    Math.round(bound.y - bbox.y - bbox.height / 2),
                     true);
         }
         shape.style.visibility = "visible";
@@ -2813,6 +2886,7 @@ Canvas.prototype.startFakeMove = function (event) {
     this.oldPos = this.currentController.getGeometry();
 
     this.currentController.setPositionSnapshot();
+    this.snappingHelper.onControllerSnapshot(this.currentController);
 
 //    OnScreenTextEditor._hide();
 
@@ -2869,6 +2943,9 @@ Canvas.prototype.__dragenter = function (event) {
 };
 Canvas.prototype.__dragleave = function (event) {
     // this.element.removeAttribute("p:selection");
+    this.element.removeAttribute("is-dragover");
+    this.element.removeAttribute("p:holding");
+
     if (!this.currentDragObserver)
         return;
     try {
@@ -2876,8 +2953,6 @@ Canvas.prototype.__dragleave = function (event) {
     } catch (e) {
         Console.dumpError(e);
     }
-    this.element.removeAttribute("is-dragover");
-    this.element.removeAttribute("p:holding");
 };
 Canvas.prototype.__dragend = function (event) {
     this.element.removeAttribute("is-dragover");

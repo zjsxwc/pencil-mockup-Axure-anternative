@@ -1,7 +1,7 @@
 function OpenClipartPane() {
     BaseTemplatedWidget.call(this);
     var thiz = this;
-    this.backend = new OpenClipartSearch();
+    this.backend = new OpenClipartSearch2();
 
     function injectSvgInfo (svg) {
         try {
@@ -100,8 +100,10 @@ OpenClipartPane.prototype.search = function () {
     this.searchAborted = true;
 
     var thiz = this;
+    this.loader.style.display = "";
     this.backend.search(this.searchInput.value, this.searchOptions, function (result) {
         thiz.renderResult(result);
+        thiz.loader.style.display = "none";
     });
 };
 OpenClipartPane.prototype.renderResult = function (result) {

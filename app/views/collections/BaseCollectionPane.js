@@ -146,12 +146,24 @@ BaseCollectionPane.prototype.reload = function (selectedCollectionId) {
         var collection = collections[i];
         if(this.isShowCollection(collection)) {
             var icon = this.getCollectionIcon(collection);
+            var typeClass = collection.developerStencil ? "TypeDeveloper" : (collection.userDefined ? "TypeUser" : "TypeSystem");
+            if (collection.builderStencil) typeClass += " TypeBuilder";
             var node = Dom.newDOMElement({
                 _name: "vbox",
-                "class": "Item",
+                "class": "Item" + (collection.previewURL ? " WithPreview" : "") + " " + typeClass,
                 "tabindex": "0",
                 title: collection.displayName,
                 _children: [
+                    {
+                        _name: "div",
+                        "class": "Preview",
+                        _children: [
+                            {
+                                _name: "img",
+                                src: collection.previewURL
+                            }
+                        ]
+                    },
                     {
                         _name: "div",
                         "class": "ItemInner",
@@ -212,12 +224,13 @@ BaseCollectionPane.prototype.reload = function (selectedCollectionId) {
 BaseCollectionPane.prototype.filterCollections = function () {
     var filter = this.searchInput.value;
     this.clearTextButton.style.display = filter != null && filter.length > 0 ? "block" : "none"
-    var collectionNodes = Dom.getList(".//*[@class='Item']", this.selectorPane);
+    var collectionNodes = this.selectorPane.querySelectorAll(".Item");
     var hasLast = false;
     var firstNode = null;
     for (var i in collectionNodes) {
         var collectionNode = collectionNodes[i];
         var collection = collectionNodes[i]._collection;
+        if (!collection) continue;
         collection._shapeCount = 0;
         collection._filteredShapes = [];
         if (!filter) {
@@ -232,6 +245,7 @@ BaseCollectionPane.prototype.filterCollections = function () {
                 collection._filteredShapes.push(def);
             }
         }
+
         if (collection._shapeCount <= 0) {
             collectionNode.setAttribute("_hidden", true);
             collectionNode.style.display = "none";
@@ -278,6 +292,18 @@ BaseCollectionPane.prototype.ensureVisibleShapeIcons = function () {
     }
 };
 BaseCollectionPane.prototype.updateLayoutSize = function () {
+    var size = "large";
+    if (this.node().offsetWidth / Util.em() <= 20) {
+        size = "small";
+    }
+
+    var currentLevel = this.node().getAttribute("size-level");
+    if (currentLevel != size) {
+        this.node().setAttribute("size-level", size);
+        this.collectionScrollView.invalidate();
+    }
+
+
     if (!this.last || !this.last.customLayout) return;
 
     this.layoutOriginalSize = {
@@ -345,9 +371,18 @@ BaseCollectionPane.prototype.openCollection = function (collection) {
                 n.removeAttribute("matched");
             }
         });
+        Dom.workOn(".//*[@pr-ref]", this.collectionLayoutContainer, function (n) {
+            if (!collection.builtinPrivateCollection || !collection.builtinPrivateCollection.map) return;
+            var defId = n.getAttribute("pr-ref");
+            var def = collection.builtinPrivateCollection.map[defId];
+            if (!def) return;
+            n._def = def;
+            n.setAttribute("draggable", "true");
+            n.setAttribute("title", def.displayName);
+        });
 
         this.collectionLayoutContainer.style.display = "block";
-        this.collectionLayoutContainer.style.overflow = "hidden";
+        // this.collectionLayoutContainer.style.overflow = "hidden";
         this.collectionLayoutContainer.style.visibility = "hidden";
         this.collectionLayoutContainer.style.height = "1px";
 

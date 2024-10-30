@@ -11,7 +11,7 @@ function SharedColorEditor() {
         Dom.emitEvent("p:PopupClosed", this.node(), {});
     }, this.selectorContainer.node());
 
-    this.selectorContainer.setPopupClass("SharedColorEditorPopup");
+    this.selectorContainer.setPopupClass("SharedColorEditorPopup ColorPopup");
     var thiz = this;
     this.selectorContainer.shouldCloseOnBlur = function(event) {
         var found = Dom.findUpward(event.target, function (node) {
@@ -37,12 +37,14 @@ SharedColorEditor.prototype.setup = function () {
         }
         if (!thiz.color) return;
         thiz.selector.setColor(thiz.color);
+        thiz.selector.setupColors();
         thiz.selectorContainer.show(thiz.node(), "left-inside", "bottom", 0, 5);
         event.cancelBubble = true;
     }, false);
 
     this.selector.addEventListener("ValueChange", function (event) {
         thiz.color = thiz.selector.getColor();
+        console.log("ValueChange", thiz.color);
         if (thiz.selectorContainer.isVisible()) {
             thiz._applyValue();
         }
@@ -85,17 +87,27 @@ SharedColorEditor.prototype._applyValue = function () {
 
     this.updateDisplayColor();
 };
+SharedColorEditor.BACKGROUND = Color.fromString("#FFFFFFFF");
+SharedColorEditor.MIN_CONTRAST = 2;
+
 SharedColorEditor.prototype.updateDisplayColor = function (defaultValue) {
     var thiz = this;
+    var lowContrast = this.color ? (this.color.getContrastTo(SharedColorEditor.BACKGROUND) < SharedColorEditor.MIN_CONTRAST) : true;
+
+    this.colorDisplay.setAttribute("property-name", this.propertyName);
+
     var handler = {
         textColor: function () {
             thiz.colorDisplay.style.color = (thiz.color) ? thiz.color.toRGBAString() : defaultValue;
+            Dom.toggleClass(thiz.colorDisplay, "LowContrast", lowContrast);
         },
         fillColor: function () {
             thiz.colorDisplay.style.backgroundColor = (thiz.color) ? thiz.color.toRGBAString() : defaultValue;
+            Dom.toggleClass(thiz.colorDisplay, "LowContrast", lowContrast);
         },
         strokeColor: function () {
             thiz.colorDisplay.style.borderColor = (thiz.color) ? thiz.color.toRGBAString() : defaultValue;
+            Dom.toggleClass(thiz.colorDisplay, "LowContrast", lowContrast);
         }
     }[this.propertyName];
 

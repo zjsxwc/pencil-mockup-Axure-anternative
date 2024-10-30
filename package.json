@@ -1,8 +1,9 @@
 {
   "name": "Pencil",
   "devDependencies": {
-    "electron-builder": "13.3.0",
-    "electron": "1.4.14",
+    "electron": "16.0.0",
+    "electron-builder": "23.3.3",
+    "electron-rebuild": "^1.8.5",
     "rimraf": "^2.5.4"
   },
   "build": {
@@ -10,26 +11,37 @@
     "productName": "Pencil",
     "copyright": "Copyright © 2008-2016 Evolus. All rights reserved.",
     "mac": {
-      "category": "public.app-category.graphics-design"
+      "category": "public.app-category.graphics-design",
+      "target": [{
+           "target": "dmg",
+           "arch": ["arm64"]
+      }]
     },
     "dmg": {
-      "contents": [{
-        "x": 356,
-        "y": 140,
-        "type": "link",
-        "path": "/Applications"
-      }, {
-        "x": 130,
-        "y": 145,
-        "type": "file"
-      }]
+      "contents": [
+        {
+          "x": 356,
+          "y": 140,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 130,
+          "y": 145,
+          "type": "file"
+        }
+      ]
     },
     "linux": {
       "description": "An open-source GUI prototyping tool that is available for ALL platforms.",
       "synopsis": "An open-source GUI prototyping tool that is available for ALL platforms.",
       "maintainer": "Nguyen Tien Dzung <ngtdungnt@gmail.com>",
       "vendor": "Evolus",
-      "target": ["deb", "rpm", "tar.gz"],
+      "target": [
+        "deb",
+        "rpm",
+        "tar.gz"
+      ],
       "depends": [],
       "category": "Graphics",
       "packageCategory": "graphics"
@@ -51,15 +63,19 @@
       "cache": ".electron-cache"
     },
     "fileAssociations": {
-      "ext": ["ep", "epz", "epgz"],
+      "ext": [
+        "ep",
+        "epz",
+        "epgz"
+      ],
       "name": "Pencil Document"
-	}
+    }
   },
   "scripts": {
     "postinstall": "install-app-deps",
     "install-app-deps": "node ./node_modules/electron-builder/out/install-app-deps.js",
     "start": "./node_modules/.bin/electron ./app",
-    "start:dev": "./node_modules/.bin/electron ./app --enable-dev --disable-gpu",
+    "start:dev": "./node_modules/.bin/electron ./app --enable-dev --enable-transparent-visuals",
     "start:mac": "./node_modules/.bin/electron ./app --enable-dev",
     "clean": "rimraf dist",
     "pack": "build",
@@ -69,5 +85,8 @@
     "dist:win32": "./node_modules/.bin/build --windows --ia32 --x64",
     "dist:osx": "./node_modules/.bin/build --macos"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@electron/remote": "^2.0.1"
+  }
 }
